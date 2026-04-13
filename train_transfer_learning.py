@@ -17,6 +17,7 @@ import numpy as np
 import tensorflow as tf
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
 from sklearn.model_selection import train_test_split
+from sklearn.utils.class_weight import compute_class_weight
 import kagglehub
 
 from model_manager import ModelManager
@@ -28,6 +29,21 @@ IMG_SIZE = 224
 BATCH_SIZE = 16
 INITIAL_EPOCHS = 15
 FINE_TUNE_EPOCHS = 8
+TARGET_TUMOR_TO_NO_TUMOR_RATIO = 2.0
+DATASET_SOURCES = [
+    {
+        "name": "sartaj",
+        "kaggle_id": "sartajbhuvaji/brain-tumor-classification-mri",
+    },
+    {
+        "name": "mri_7000",
+        "kaggle_id": "masoudnickparvar/brain-tumor-mri-dataset",
+    },
+    {
+        "name": "negative_boost",
+        "kaggle_id": "praneet0327/brain-tumor-dataset",
+    },
+]
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -52,47 +68,53 @@ def _is_image_file(path: Path) -> bool:
     return path.suffix.lower() in {".jpg", ".jpeg", ".png"}
 
 
-def _folder_to_binary_label(folder_name: str):
-    #Mappe un nom de classe vers binaire: no_tumor=0, autres tumeurs=1.
-    name = folder_name.lower().replace("-", "_").replace(" ", "_")
-    if "no_tumor" in name or name in {"no", "normal", "healthy"}:
+def _normalize_label_token(value: str):
+    return value.lower().replace("-", "_").replace(" ", "_")
+
+
+def _token_to_binary_label(token: str):
+    #Mappe un nom de dossier vers binaire: no_tumor=0, autres tumeurs=1.
+    name = _normalize_label_token(token)
+    negative_tokens = {"no", "normal", "healthy", "negative", "neg", "non_tumor", "no_tumor", "notumor", "control", "clean"}
+    positive_tokens = {"yes", "positive", "pos", "tumor", "tumour", "glioma", "meningioma", "pituitary", "abnormal"}
+
+    if name in negative_tokens or "no_tumor" in name or "notumor" in name or "negative" in name or "healthy" in name:
         return 0
-    if any(key in name for key in ["tumor", "tumour", "glioma", "meningioma", "pituitary"]):
+    if name in positive_tokens or any(key in name for key in ["tumor", "tumour", "glioma", "meningioma", "pituitary", "positive", "abnormal"]):
         return 1
     return None
 
 
+def _infer_label_from_path(image_path: Path, dataset_dir: Path):
+    relative_parts = image_path.relative_to(dataset_dir).parts[:-1]
+    for part in reversed(relative_parts):
+        label = _token_to_binary_label(part)
+        if label is not None:
+            return label
+    return None
+
+
 def load_filepaths_and_labels(dataset_dir: Path):
-    #Charge un dataset multiclasses et le convertit en binaire.
+    #Charge un dataset et le convertit en binaire à partir de la structure des dossiers.
     image_paths = []
     labels = []
     class_counts = {"no_tumor": 0, "tumor": 0}
 
-    # Cas Sartaj: sous-dossiers Training/Testing contenant les classes
-    candidate_roots = []
-    for split_name in ["Training", "Testing", "train", "test", "validation", "val"]:
-        split_dir = dataset_dir / split_name
-        if split_dir.exists() and split_dir.is_dir():
-            candidate_roots.append(split_dir)
+    for file_path in dataset_dir.rglob("*"):
+        if not file_path.is_file() or not _is_image_file(file_path):
+            continue
 
-    # Fallback: classes directement à la racine
-    if not candidate_roots:
-        candidate_roots.append(dataset_dir)
+        label = _infer_label_from_path(file_path, dataset_dir)
+        if label is None:
+            continue
 
-    for root in candidate_roots:
-        for class_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
-            label = _folder_to_binary_label(class_dir.name)
-            if label is None:
-                continue
+        image_paths.append(str(file_path))
+        labels.append(label)
 
-            files = [p for p in class_dir.rglob("*") if p.is_file() and _is_image_file(p)]
-            image_paths.extend([str(path) for path in files])
-            labels.extend([label] * len(files))
-
-            if label == 0:
-                class_counts["no_tumor"] += len(files)
-            else:
-                class_counts["tumor"] += len(files)
+        if label == 0:
+            class_counts["no_tumor"] += 1
+        else:
+            class_counts["tumor"] += 1
 
     if not image_paths:
         raise RuntimeError(
@@ -100,6 +122,43 @@ def load_filepaths_and_labels(dataset_dir: Path):
         )
 
     return np.array(image_paths), np.array(labels), class_counts
+
+
+def load_multiple_datasets(dataset_sources):
+    """Télécharge plusieurs datasets et fusionne les chemins/labels binaires."""
+    all_image_paths = []
+    all_labels = []
+    source_summaries = {}
+
+    print("Téléchargement et fusion des datasets...")
+    for source in dataset_sources:
+        source_name = source["name"]
+        source_id = source["kaggle_id"]
+        print(f"- [{source_name}] téléchargement: {source_id}")
+
+        dataset_path = Path(kagglehub.dataset_download(source_id))
+        image_paths, labels, class_counts = load_filepaths_and_labels(dataset_path)
+
+        all_image_paths.append(image_paths)
+        all_labels.append(labels)
+        source_summaries[source_name] = {
+            "kaggle_id": source_id,
+            "path": str(dataset_path),
+            "num_images": int(len(image_paths)),
+            "tumor": int(class_counts["tumor"]),
+            "no_tumor": int(class_counts["no_tumor"]),
+        }
+
+        print(
+            f"  -> {len(image_paths)} images (tumor={class_counts['tumor']}, no_tumor={class_counts['no_tumor']})"
+        )
+
+    if not all_image_paths:
+        raise RuntimeError("Aucun dataset n'a été chargé.")
+
+    merged_paths = np.concatenate(all_image_paths)
+    merged_labels = np.concatenate(all_labels)
+    return merged_paths, merged_labels, source_summaries
 
 
 def decode_and_resize(path, label):
@@ -140,12 +199,53 @@ def find_calibrated_threshold(y_true, y_proba):
     return best_threshold
 
 
-print("Téléchargement du dataset...")
-dataset_path = Path(kagglehub.dataset_download("sartajbhuvaji/brain-tumor-classification-mri"))
+def rebalance_binary_dataset(image_paths, labels, target_ratio=2.0, seed=42):
+    """Réduit la classe majoritaire pour limiter le ratio tumor/no_tumor."""
+    rng = np.random.default_rng(seed)
 
-image_paths, labels, class_counts = load_filepaths_and_labels(dataset_path)
-print(f"Images trouvées: {len(image_paths)}")
-print(f"Tumeurs: {class_counts['tumor']} | Sans tumeur: {class_counts['no_tumor']}")
+    tumor_idx = np.where(labels == 1)[0]
+    no_tumor_idx = np.where(labels == 0)[0]
+
+    if len(tumor_idx) == 0 or len(no_tumor_idx) == 0:
+        raise RuntimeError("Impossible de rééquilibrer: au moins une classe est vide.")
+
+    max_tumor = int(len(no_tumor_idx) * target_ratio)
+    if len(tumor_idx) > max_tumor:
+        sampled_tumor_idx = rng.choice(tumor_idx, size=max_tumor, replace=False)
+    else:
+        sampled_tumor_idx = tumor_idx
+
+    selected_idx = np.concatenate([sampled_tumor_idx, no_tumor_idx])
+    rng.shuffle(selected_idx)
+
+    return image_paths[selected_idx], labels[selected_idx]
+
+
+image_paths, labels, source_summaries = load_multiple_datasets(DATASET_SOURCES)
+total_tumor = int(np.sum(labels == 1))
+total_no_tumor = int(np.sum(labels == 0))
+
+print(f"Images totales trouvées: {len(image_paths)}")
+print(f"Tumeurs: {total_tumor} | Sans tumeur: {total_no_tumor}")
+print("Détail par source:")
+for source_name, summary in source_summaries.items():
+    print(
+        f"- {source_name}: total={summary['num_images']}, "
+        f"tumor={summary['tumor']}, no_tumor={summary['no_tumor']}"
+    )
+
+image_paths, labels = rebalance_binary_dataset(
+    image_paths,
+    labels,
+    target_ratio=TARGET_TUMOR_TO_NO_TUMOR_RATIO,
+    seed=SEED,
+)
+balanced_tumor = int(np.sum(labels == 1))
+balanced_no_tumor = int(np.sum(labels == 0))
+print(
+    f"Après rééquilibrage (ratio max {TARGET_TUMOR_TO_NO_TUMOR_RATIO:.1f}:1) -> "
+    f"Tumeurs: {balanced_tumor} | Sans tumeur: {balanced_no_tumor}"
+)
 
 X_train_paths, X_temp_paths, y_train, y_temp = train_test_split(
     image_paths,
@@ -163,6 +263,14 @@ X_val_paths, X_test_paths, y_val, y_test = train_test_split(
 )
 
 print(f"Train: {len(X_train_paths)} | Val: {len(X_val_paths)} | Test: {len(X_test_paths)}")
+
+class_weights_array = compute_class_weight(
+    class_weight="balanced",
+    classes=np.array([0, 1]),
+    y=y_train,
+)
+class_weight = {0: float(class_weights_array[0]), 1: float(class_weights_array[1])}
+print(f"Class weight: {class_weight}")
 
 train_ds = tf.data.Dataset.from_tensor_slices((X_train_paths, y_train))
 train_ds = train_ds.shuffle(buffer_size=len(X_train_paths), seed=SEED, reshuffle_each_iteration=True)
@@ -228,6 +336,7 @@ history_initial = model.fit(
     validation_data=val_ds,
     epochs=INITIAL_EPOCHS,
     callbacks=callbacks,
+    class_weight=class_weight,
     verbose=1,
 )
 
@@ -248,6 +357,7 @@ history_finetune = model.fit(
     epochs=INITIAL_EPOCHS + FINE_TUNE_EPOCHS,
     initial_epoch=history_initial.epoch[-1] + 1,
     callbacks=callbacks,
+    class_weight=class_weight,
     verbose=1,
 )
 
@@ -334,6 +444,16 @@ metrics = {
         "recall": float(rec),
         "f1_score": float(f1),
         "confusion_matrix": cm.tolist(),
+    },
+    "dataset_sources": source_summaries,
+    "num_images_total": int(len(image_paths)),
+    "class_distribution_before_rebalance": {
+        "tumor": total_tumor,
+        "no_tumor": total_no_tumor,
+    },
+    "class_distribution_total": {
+        "tumor": balanced_tumor,
+        "no_tumor": balanced_no_tumor,
     },
     "model_path": str(model_path),
 }

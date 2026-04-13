@@ -83,14 +83,16 @@ def predict_irm(image: Image.Image, sensitive_mode: bool):
         confidence_text = f"Confiance: {confidence * 100:.2f}%"
         probability_text = f"Probabilité brute (classe tumeur): {probability:.4f}"
         threshold_text = f"Seuil de décision utilisé: {threshold:.2f}"
+        status_badge = "ALERTE" if has_tumor else "RAS"
 
         result_html = (
-            "<div style='padding: 16px; border-radius: 12px; border: 1px solid #2a2a2a; '"
-            f"background-color: {'#3a1f1f' if has_tumor else '#1f3a26'}; color: white;'>"
-            f"<h3 style='margin: 0 0 8px 0;'>{result_text}</h3>"
-            f"<p style='margin: 0 0 6px 0;'>{confidence_text}</p>"
-            f"<p style='margin: 0;'>{probability_text}</p>"
-            f"<p style='margin: 6px 0 0 0;'>{threshold_text}</p>"
+            "<div class='result-card "
+            f"{'danger' if has_tumor else 'safe'}'>"
+            f"<div class='result-badge'>{status_badge}</div>"
+            f"<h3>{result_text}</h3>"
+            f"<p>{confidence_text}</p>"
+            f"<p>{probability_text}</p>"
+            f"<p>{threshold_text}</p>"
             "</div>"
         )
 
@@ -104,25 +106,124 @@ def predict_irm(image: Image.Image, sensitive_mode: bool):
 
 
 custom_css = """
+:root {
+    --bg-start: #0b1220;
+    --bg-end: #0f2f2d;
+    --panel: rgba(10, 15, 26, 0.65);
+    --panel-border: rgba(255, 255, 255, 0.15);
+    --txt: #f4f7fb;
+    --muted: #b7c0cf;
+    --accent: #21c78a;
+    --warn: #ff7b6b;
+    --warn-bg: rgba(255, 123, 107, 0.15);
+    --ok-bg: rgba(33, 199, 138, 0.15);
+}
+
+.gradio-container {
+    background: radial-gradient(circle at 10% 10%, #16304c, transparent 35%),
+                radial-gradient(circle at 90% 15%, #1b4a47, transparent 30%),
+                linear-gradient(140deg, var(--bg-start), var(--bg-end));
+    color: var(--txt);
+    font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+.hero {
+    background: linear-gradient(120deg, rgba(20, 29, 45, 0.82), rgba(14, 57, 54, 0.82));
+    border: 1px solid var(--panel-border);
+    border-radius: 18px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.25);
+}
+
+.hero h1 {
+    margin: 0 0 8px 0;
+    font-size: 1.7rem;
+    letter-spacing: 0.4px;
+}
+
+.hero p {
+    margin: 4px 0;
+    color: var(--muted);
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 14px;
+    backdrop-filter: blur(4px);
+}
+
+.result-card {
+    border-radius: 14px;
+    border: 1px solid var(--panel-border);
+    padding: 14px 14px 10px 14px;
+}
+
+.result-card h3 {
+    margin: 0 0 8px 0;
+}
+
+.result-card p {
+    margin: 5px 0;
+    color: #e9edf4;
+}
+
+.result-card.safe {
+    background: var(--ok-bg);
+}
+
+.result-card.danger {
+    background: var(--warn-bg);
+}
+
+.result-badge {
+    display: inline-block;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.18);
+}
+
+#predict-btn {
+    border: none !important;
+    background: linear-gradient(120deg, #20bb83, #17a49d) !important;
+    color: #ffffff !important;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+#predict-btn:hover {
+    filter: brightness(1.08);
+}
+
 .footer-note {
-    font-size: 0.92rem;
-    color: #9ca3af;
+    font-size: 0.9rem;
+    color: var(--muted);
 }
 """
 
 
 with gr.Blocks(title="Détection de tumeur cérébrale - Modèle avancé", theme=gr.themes.Soft(), css=custom_css) as demo:
-    gr.Markdown("# Détection de tumeur cérébrale - Modèle avancé")
     gr.Markdown(
-        "Importe une image IRM 2D et le modèle avancé renvoie un verdict binaire : tumeur ou pas de tumeur."
-    )
-    gr.Markdown(
-        "<div class='footer-note'>Prototype pédagogique. Ce projet ne remplace pas un avis médical.</div>"
+        """
+        <div class='hero'>
+            <h1>Détection IRM - Tumeur Cérébrale</h1>
+            <p>Analyse binaire assistée par deep learning sur image IRM 2D.</p>
+            <p class='footer-note'>Prototype pédagogique: ne remplace pas un diagnostic médical.</p>
+        </div>
+        """
     )
 
     with gr.Row():
-        image_input = gr.Image(type="pil", label="Image IRM", sources=["upload"], height=360)
-        with gr.Column():
+        with gr.Column(elem_classes=["panel"], scale=6):
+            image_input = gr.Image(type="pil", label="Image IRM", sources=["upload"], height=380)
+
+        with gr.Column(elem_classes=["panel"], scale=5):
             sensitive_mode_input = gr.Checkbox(
                 value=True,
                 label="Mode sensible (réduit les faux négatifs)",
@@ -131,11 +232,19 @@ with gr.Blocks(title="Détection de tumeur cérébrale - Modèle avancé", theme
             result_output = gr.HTML(label="Résultat")
             probability_output = gr.Label(label="Répartition des classes")
 
-    predict_button = gr.Button("Analyser l'image")
+    with gr.Row():
+        predict_button = gr.Button("Analyser l'image", elem_id="predict-btn", variant="primary")
+        clear_button = gr.Button("Réinitialiser", variant="secondary")
+
     predict_button.click(
         fn=predict_irm,
         inputs=[image_input, sensitive_mode_input],
         outputs=[result_output, probability_output],
+    )
+    clear_button.click(
+        fn=lambda: (None, "", None),
+        inputs=None,
+        outputs=[image_input, result_output, probability_output],
     )
 
 

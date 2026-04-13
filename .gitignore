@@ -28,6 +28,10 @@ build/
 dist/
 *.egg-info/
 
+# Project artifacts
+models/
+outputs/
+
 # OS files
 .DS_Store
 Thumbs.db

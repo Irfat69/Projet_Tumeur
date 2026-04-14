@@ -1,154 +1,170 @@
-# Detection De Tumeur Cerebrale Sur IRM
+# Detection de tumeur cerebrale sur IRM
 
-Projet Python de classification binaire sur images IRM cerebrales:
-- classe 0: sans tumeur
-- classe 1: tumeur
+Prototype de deep learning pour l analyse d images IRM 2D avec deux taches:
+1. detection binaire: tumeur vs aucune tumeur
+2. classification du type de tumeur: glioma, meningioma, pituitary
 
-Le projet inclut:
-- un notebook pedagogique 
-- un script d entrainement avance avec transfer learning
-- une application web Gradio pour tester des images localement
+Ce projet combine entrainement, evaluation et interface web locale.
 
-## Objectif
+Important: projet pedagogique. Il ne remplace pas un diagnostic medical.
 
-Construire un modele robuste pour le depistage binaire, avec une priorite sur la reduction des faux negatifs (cas tumeur rates), tout en gardant une interface simple a utiliser.
+## Objectifs
 
-## Fonctionnalites Principales
+1. Construire un modele binaire robuste avec priorite sur la reduction des faux negatifs.
+2. Ajouter un modele multiclasses pour proposer un type suspect quand une tumeur est detectee.
+3. Fournir une app Gradio simple pour tester des IRM localement.
 
-- Chargement de plusieurs datasets Kaggle et fusion des donnees.
-- Mapping automatique des structures de dossiers vers des labels binaires.
-- Reequilibrage explicite du dataset avant entrainement pour limiter le biais de classe.
-- Transfer learning avec MobileNetV2 + fine tuning.
-- Calibration automatique du seuil de decision sur l ensemble de validation.
-- Export des metriques, matrice de confusion et courbes d entrainement.
-- Interface Gradio moderne pour inference image par image.
+## Stack technique
 
-## Structure Du Projet
+1. Python 3
+2. TensorFlow / Keras (CNN par transfer learning)
+3. scikit-learn (split, metriques, class weights)
+4. Gradio (interface)
+5. kagglehub (telechargement datasets)
 
-- brain_tumor_level1.ipynb: notebook d exploration et baseline.
-- train_transfer_learning.py: pipeline d entrainement principal.
-- app.py: interface web locale Gradio.
-- model_manager.py: sauvegarde/chargement modele et metriques.
-- utils.py: fonctions utilitaires (affichages, graphiques, etc.).
-- models/: modeles sauvegardes (.keras).
-- outputs/: metriques JSON et graphes PNG.
+## Architecture du projet
 
-## Pre Requis
+1. `app.py`
+Interface web Gradio. Charge le modele binaire et affiche:
+- verdict principal
+- repartition des classes
+- type suspect (si detecte)
 
-- Linux, macOS ou Windows.
-- Python 3.10+ recommande.
-- Un environnement virtuel Python.
-- Connexion internet pour telecharger les datasets Kaggle via kagglehub.
+2. `train_transfer_learning.py`
+Pipeline d entrainement du modele binaire.
+
+3. `train_tumor_type_classifier.py`
+Pipeline d entrainement multiclasses du type de tumeur.
+
+4. `model_manager.py`
+Sauvegarde et chargement des modeles/metriques.
+
+5. `utils.py`
+Utilitaires de visualisation et evaluation.
+
+6. `brain_tumor.ipynb`
+Notebook principal d exploration / experimentation.
+
+7. `analyse_dataset_types.ipynb`
+Notebook d audit des datasets types (distribution, mapping, labels).
+
+8. `models/`
+Modeles `.keras` sauvegardes.
+
+9. `outputs/`
+Metriques JSON et graphes d entrainement.
 
 ## Installation
 
-1. Cloner le projet:
+1. Cloner le depot
 
 ```bash
 git clone <url-du-repo>
 cd Projet_Tumeur
 ```
 
-2. Creer et activer un environnement virtuel:
+2. Creer un environnement virtuel
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-3. Installer les dependances:
+3. Installer les dependances
 
 ```bash
 pip install --upgrade pip
-pip install tensorflow numpy pillow scikit-learn matplotlib pandas gradio kagglehub
+pip install tensorflow numpy pillow scikit-learn matplotlib pandas gradio kagglehub h5py
 ```
 
-## Entrainement Avance
+## Datasets utilises
 
-Lancer le script:
+Les sources sont configurees dans `train_transfer_learning.py` et `train_tumor_type_classifier.py`.
+
+Exemples de sources utilises:
+1. `sartajbhuvaji/brain-tumor-classification-mri`
+2. `masoudnickparvar/brain-tumor-mri-dataset`
+3. `ashkhagan/figshare-brain-tumor-dataset` (format `.mat`)
+
+Note:
+Le dataset Figshare ne suit pas la structure dossier par classe classique. Les labels sont stockes dans les fichiers `.mat`.
+
+## Entrainement
+
+### 1) Modele binaire
 
 ```bash
 source venv/bin/activate
 python3 train_transfer_learning.py
 ```
 
-Le script execute:
+Sorties principales:
+1. `models/brain_tumor_transfer.keras`
+2. `outputs/transfer_results.json`
+3. `outputs/transfer_training_history.png`
 
-1. Telechargement et fusion de plusieurs datasets.
-2. Conversion en labels binaires selon les noms de dossiers.
-3. Reequilibrage des classes avec ratio cible configurable.
-4. Split train/validation/test stratifie.
-5. Entrainement en 2 phases:
-	- phase 1: tete de classification
-	- phase 2: fine tuning partiel
-6. Calibration du seuil sur validation.
-7. Evaluation finale au seuil 0.50 et au seuil calibre.
-8. Sauvegarde du modele et des metriques.
+### 2) Modele type de tumeur
 
-## Datasets Utilises
+```bash
+source venv/bin/activate
+python3 train_tumor_type_classifier.py
+```
 
-Le script charge actuellement plusieurs sources definies dans train_transfer_learning.py.
+Sorties principales:
+1. `models/brain_tumor_type.keras`
+2. `outputs/tumor_type_results.json`
+3. `outputs/tumor_type_training_history.png`
 
-Exemples de sources integrees:
-- sartajbhuvaji/brain-tumor-classification-mri
-- masoudnickparvar/brain-tumor-mri-dataset
-- praneet0327/brain-tumor-dataset
-
-Important:
-- les structures de dossiers varient selon les datasets
-- le mapping de labels repose sur des tokens de dossiers (ex: no_tumor, notumor, negative, tumor, glioma, etc.)
-- en cas de fort desequilibre, ajuster le ratio de reequilibrage dans train_transfer_learning.py
-
-## Calibration Du Seuil
-
-Le modele ne s arrete pas au seuil fixe 0.50.
-
-Le pipeline:
-- calcule un seuil calibre sur validation
-- privilegie le rappel de la classe tumeur
-- sauvegarde ce seuil dans outputs/transfer_results.json
-
-L application lit ensuite ce seuil automatiquement.
-
-## Lancer L Interface Web
+## Lancer l application
 
 ```bash
 source venv/bin/activate
 python3 app.py
 ```
 
-Puis ouvrir l URL locale fournie par Gradio (souvent http://127.0.0.1:7860).
+Puis ouvrir l URL locale fournie par Gradio (souvent `http://127.0.0.1:7860`).
 
-Fonctions de l app:
-- upload d image IRM
-- prediction binaire
-- affichage probabilites par classe
-- mode sensible pour reduire les faux negatifs
+## Resultats recents (type de tumeur)
 
-## Fichiers De Sortie
+Exemple de run recent:
+1. Accuracy: 0.876
+2. Precision macro: 0.881
+3. Recall macro: 0.874
+4. F1 macro: 0.872
 
-- models/brain_tumor_transfer.keras: modele entraine.
-- outputs/transfer_results.json: metriques, seuil calibre, distributions de classes.
-- outputs/transfer_training_history.png: courbes d entrainement.
+Lecture rapide:
+1. bonnes performances globales
+2. classe la plus difficile: meningioma (confusion frequente avec pituitary)
 
-## Depannage Rapide
+## Evaluation et suivi
 
-1. Message CUDA non trouve
-- Ce n est pas bloquant.
-- TensorFlow bascule sur CPU.
+Le projet exporte:
+1. confusion matrix
+2. classification report par classe
+3. historique entrainement/validation
+4. resume JSON pour reproductibilite
 
-2. Desequilibre de classes tres eleve
-- Verifier les comptes par dataset dans les logs.
-- Ajuster le ratio de reequilibrage dans train_transfer_learning.py.
+## Limites actuelles
 
-3. Resultats trop agressifs sur la classe tumeur
-- Verifier le seuil calibre.
-- Comparer mode normal vs mode sensible dans l app.
+1. risque de biais si des images proches se retrouvent a la fois en train et test
+2. heterogeneite des sources Kaggle (qualite d annotation variable)
+3. projet non certifie medicalement
 
-4. Erreur modele introuvable dans l app
-- Lancer d abord un entrainement pour generer models/brain_tumor_transfer.keras.
+## Plan d amelioration
+
+1. split plus robuste par groupe patient quand possible
+2. deduplication inter-sources
+3. test de backbones alternatifs (EfficientNet)
+4. calibration et strategie de seuil par classe
+5. analyse approfondie des erreurs meningioma vs pituitary
+
+## Portfolio: points forts a mettre en avant
+
+1. pipeline end-to-end (data, training, eval, app)
+2. approche orientee metriques et reduction des faux negatifs
+3. integration de plusieurs sources de donnees
+4. audit explicite de la qualite des labels
 
 ## Auteur
-Irfat FEJZULLAHU
 
-Projet realise dans un cadre d apprentissage machine learning applique aux IRM cerebrales.
+Irfat FEJZULLAHU

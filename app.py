@@ -15,10 +15,16 @@ MODELS_DIR = BASE_DIR / "models"
 OUTPUT_DIR = BASE_DIR / "outputs"
 METRICS_FILE = OUTPUT_DIR / "transfer_results.json"
 MODEL_NAME = "brain_tumor_transfer"
+TUMOR_TYPE_MODEL_NAME = "brain_tumor_type"
+TUMOR_TYPE_CLASS_NAMES = ["glioma", "meningioma", "pituitary"]
 
 
 manager = ModelManager(models_dir=MODELS_DIR)
 model = manager.load_model(MODEL_NAME)
+try:
+    tumor_type_model = manager.load_model(TUMOR_TYPE_MODEL_NAME)
+except FileNotFoundError:
+    tumor_type_model = None
 
 
 def _load_calibrated_threshold(default=0.5):
@@ -47,12 +53,12 @@ def _get_model_input_spec(loaded_model):
     return int(height), int(width), int(channels)
 
 
-def preprocess_image(image: Image.Image) -> np.ndarray:
-    """Prépare l'image pour le modèle Keras."""
+def preprocess_image_for_model(image: Image.Image, loaded_model) -> np.ndarray:
+    """Prépare l'image pour un modèle Keras donné."""
     if image is None:
         raise ValueError("Aucune image fournie.")
 
-    height, width, channels = _get_model_input_spec(model)
+    height, width, channels = _get_model_input_spec(loaded_model)
 
     if channels == 1:
         image = image.convert("L")
@@ -70,6 +76,28 @@ def preprocess_image(image: Image.Image) -> np.ndarray:
     return image_array
 
 
+def preprocess_image(image: Image.Image) -> np.ndarray:
+    """Prépare l'image pour le modèle binaire principal."""
+    return preprocess_image_for_model(image, model)
+
+
+def _predict_tumor_type(image: Image.Image):
+    """Prédit le type de tumeur si le modèle multiclasses est disponible."""
+    if tumor_type_model is None:
+        return None, None, None
+
+    type_image_array = preprocess_image_for_model(image, tumor_type_model)
+    type_probs = tumor_type_model.predict(type_image_array, verbose=0)[0]
+    best_idx = int(np.argmax(type_probs))
+    best_label = TUMOR_TYPE_CLASS_NAMES[best_idx]
+    best_conf = float(type_probs[best_idx])
+    type_distribution = {
+        class_name: float(type_probs[idx])
+        for idx, class_name in enumerate(TUMOR_TYPE_CLASS_NAMES)
+    }
+    return best_label, best_conf, type_distribution
+
+
 def predict_irm(image: Image.Image, sensitive_mode: bool):
     """Retourne un verdict binaire à partir d'une image IRM."""
     try:
@@ -78,12 +106,26 @@ def predict_irm(image: Image.Image, sensitive_mode: bool):
         threshold = max(0.20, CALIBRATED_THRESHOLD - 0.10) if sensitive_mode else CALIBRATED_THRESHOLD
         has_tumor = probability >= threshold
         confidence = probability if has_tumor else 1.0 - probability
+        decision_probability = 1.0 / (1.0 + np.exp(-12.0 * (probability - threshold)))
 
         result_text = "Tumeur détectée" if has_tumor else "Aucune tumeur détectée"
         confidence_text = f"Confiance: {confidence * 100:.2f}%"
         probability_text = f"Probabilité brute (classe tumeur): {probability:.4f}"
         threshold_text = f"Seuil de décision utilisé: {threshold:.2f}"
         status_badge = "ALERTE" if has_tumor else "RAS"
+        type_text = ""
+        tumor_type_distribution = {"Non évalué": 1.0}
+
+        if has_tumor:
+            suspected_type, suspected_type_conf, predicted_distribution = _predict_tumor_type(image)
+            if suspected_type is not None:
+                type_text = (
+                    f"<p>Type suspect: {suspected_type} "
+                    f"(confiance {suspected_type_conf * 100:.2f}%)</p>"
+                )
+                tumor_type_distribution = predicted_distribution
+            else:
+                type_text = "<p>Type de tumeur: modèle indisponible.</p>"
 
         result_html = (
             "<div class='result-card "
@@ -93,14 +135,20 @@ def predict_irm(image: Image.Image, sensitive_mode: bool):
             f"<p>{confidence_text}</p>"
             f"<p>{probability_text}</p>"
             f"<p>{threshold_text}</p>"
+            f"{type_text}"
             "</div>"
         )
 
-        return result_html, {"Aucune tumeur": 1.0 - probability, "Tumeur": probability}
+        return (
+            result_html,
+            {"Aucune tumeur": 1.0 - float(decision_probability), "Tumeur": float(decision_probability)},
+            tumor_type_distribution,
+        )
     except Exception as error:
         return (
             f"<div style='padding: 16px; border-radius: 12px; background-color: #4a1f1f; color: white;'>"
             f"Erreur: {error}</div>",
+            {"Erreur": 1.0},
             {"Erreur": 1.0},
         )
 
@@ -230,7 +278,8 @@ with gr.Blocks(title="Détection de tumeur cérébrale - Modèle avancé", theme
                 info="Active un seuil plus bas pour détecter plus de cas suspects.",
             )
             result_output = gr.HTML(label="Résultat")
-            probability_output = gr.Label(label="Répartition des classes")
+            probability_output = gr.Label(label="Répartition des classes (selon seuil)")
+            tumor_type_output = gr.Label(label="Type de tumeur (si détectée)")
 
     with gr.Row():
         predict_button = gr.Button("Analyser l'image", elem_id="predict-btn", variant="primary")
@@ -239,12 +288,12 @@ with gr.Blocks(title="Détection de tumeur cérébrale - Modèle avancé", theme
     predict_button.click(
         fn=predict_irm,
         inputs=[image_input, sensitive_mode_input],
-        outputs=[result_output, probability_output],
+        outputs=[result_output, probability_output, tumor_type_output],
     )
     clear_button.click(
-        fn=lambda: (None, "", None),
+        fn=lambda: (None, "", None, None),
         inputs=None,
-        outputs=[image_input, result_output, probability_output],
+        outputs=[image_input, result_output, probability_output, tumor_type_output],
     )
 
 

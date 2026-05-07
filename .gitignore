@@ -20,6 +20,10 @@ env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.cache/
+.kaggle/
+.keras/
+*.log
 .coverage
 htmlcov/
 
@@ -31,6 +35,11 @@ dist/
 # Project artifacts
 models/
 outputs/
+*.keras
+*.h5
+*.hdf5
+*.ckpt
+checkpoint
 
 # OS files
 .DS_Store

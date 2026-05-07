@@ -188,6 +188,7 @@ custom_css = """
     margin: 0 0 8px 0;
     font-size: 1.7rem;
     letter-spacing: 0.4px;
+    color: var(--txt);
 }
 
 .hero p {
@@ -256,7 +257,7 @@ custom_css = """
 """
 
 
-with gr.Blocks(title="Détection de tumeur cérébrale - Modèle avancé", theme=gr.themes.Soft(), css=custom_css) as demo:
+with gr.Blocks(title="Détection de tumeur cérébrale - Modèle avancé") as demo:
     gr.Markdown(
         """
         <div class='hero'>
@@ -298,4 +299,4 @@ with gr.Blocks(title="Détection de tumeur cérébrale - Modèle avancé", theme
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(theme=gr.themes.Soft(), css=custom_css)

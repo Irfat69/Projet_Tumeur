@@ -1,0 +1,9 @@
+tensorflow
+numpy
+pillow
+scikit-learn
+matplotlib
+pandas
+gradio
+kagglehub
+h5py

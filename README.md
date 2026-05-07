@@ -6,7 +6,7 @@ Prototype de deep learning pour l analyse d images IRM 2D avec deux taches:
 
 Ce projet combine entrainement, evaluation et interface web locale.
 
-Important: projet pedagogique. Il ne remplace pas un diagnostic medical.
+> Important: ce projet est un prototype pedagogique. Il ne constitue pas un dispositif medical, ne fournit pas de diagnostic et ne doit jamais remplacer l'avis d'un professionnel de sante.
 
 ## Objectifs
 
@@ -45,14 +45,14 @@ Utilitaires de visualisation et evaluation.
 6. `brain_tumor.ipynb`
 Notebook principal d exploration / experimentation.
 
-7. `analyse_dataset_types.ipynb`
-Notebook d audit des datasets types (distribution, mapping, labels).
-
-8. `models/`
+7. `models/`
 Modeles `.keras` sauvegardes.
 
-9. `outputs/`
+8. `outputs/`
 Metriques JSON et graphes d entrainement.
+
+9. `data_tumeur.json`
+Contenu structure pour integration dans un portfolio.
 
 ## Installation
 
@@ -74,7 +74,7 @@ source venv/bin/activate
 
 ```bash
 pip install --upgrade pip
-pip install tensorflow numpy pillow scikit-learn matplotlib pandas gradio kagglehub h5py
+pip install -r requirements.txt
 ```
 
 ## Datasets utilises
@@ -146,9 +146,10 @@ Le projet exporte:
 
 ## Limites actuelles
 
-1. risque de biais si des images proches se retrouvent a la fois en train et test
-2. heterogeneite des sources Kaggle (qualite d annotation variable)
-3. projet non certifie medicalement
+1. projet pedagogique non certifie medicalement
+2. risque de biais si des images proches se retrouvent a la fois en train et test
+3. heterogeneite des sources Kaggle (qualite d annotation variable)
+4. absence de validation clinique externe
 
 ## Plan d amelioration
 

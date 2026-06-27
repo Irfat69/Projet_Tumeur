@@ -13,6 +13,7 @@ Ce projet combine entrainement, evaluation et interface web locale.
 1. Construire un modele binaire robuste avec priorite sur la reduction des faux negatifs.
 2. Ajouter un modele multiclasses pour proposer un type suspect quand une tumeur est detectee.
 3. Fournir une app Gradio simple pour tester des IRM localement.
+4. Afficher une carte Grad-CAM pour visualiser les zones influentes de l'image.
 
 ## Stack technique
 
@@ -29,6 +30,7 @@ Interface web Gradio. Charge le modele binaire et affiche:
 - verdict principal
 - repartition des classes
 - type suspect (si detecte)
+- visualisation Grad-CAM des zones influentes
 
 2. `train_transfer_learning.py`
 Pipeline d entrainement du modele binaire.
@@ -43,7 +45,7 @@ Sauvegarde et chargement des modeles/metriques.
 Utilitaires de visualisation et evaluation.
 
 6. `brain_tumor.ipynb`
-Notebook principal d exploration / experimentation.
+Notebook d exploration initiale avec un baseline CNN simple.
 
 7. `models/`
 Modeles `.keras` sauvegardes.
@@ -124,17 +126,68 @@ python3 app.py
 
 Puis ouvrir l URL locale fournie par Gradio (souvent `http://127.0.0.1:7860`).
 
-## Resultats recents (type de tumeur)
+Pour utiliser un autre port:
 
-Exemple de run recent:
-1. Accuracy: 0.876
-2. Precision macro: 0.881
-3. Recall macro: 0.874
-4. F1 macro: 0.872
+```bash
+GRADIO_SERVER_PORT=8501 python3 app.py
+```
+
+## Notebook d exploration
+
+Le fichier `brain_tumor.ipynb` est conserve comme trace pedagogique de l exploration initiale:
+1. chargement d un petit dataset binaire
+2. visualisation de quelques IRM
+3. entrainement d un CNN simple
+4. evaluation de base
+
+Les pipelines de reference du projet sont les scripts Python:
+1. `train_transfer_learning.py` pour le modele binaire final
+2. `train_tumor_type_classifier.py` pour le modele multiclasses
+3. `app.py` pour l interface Gradio avec Grad-CAM
+
+## Resultats recents
+
+### Detection binaire
+
+Run recent apres deduplication exacte et reequilibrage:
+1. Accuracy: 0.9756
+2. Precision: 0.9753
+3. Recall: 0.9884
+4. F1-score: 0.9818
+5. Seuil calibre: 0.29
+
+Matrice de confusion:
+
+```text
+[[247, 13],
+ [  6, 513]]
+```
 
 Lecture rapide:
-1. bonnes performances globales
-2. classe la plus difficile: meningioma (confusion frequente avec pituitary)
+1. le modele garde un rappel eleve sur la classe tumeur
+2. 6 faux negatifs sur le jeu de test
+3. 8069 doublons exacts retires avant le split
+
+### Classification du type de tumeur
+
+Run recent apres deduplication exacte:
+1. Accuracy: 0.8341
+2. Precision macro: 0.8347
+3. Recall macro: 0.8291
+4. F1 macro: 0.8215
+
+Matrice de confusion:
+
+```text
+[[470,  54,  35],
+ [ 28, 246, 105],
+ [  0,   1, 405]]
+```
+
+Lecture rapide:
+1. 8960 images uniques apres suppression de 2268 doublons exacts
+2. split stratifie: 6272 train, 1344 validation, 1344 test
+3. classe la plus difficile: meningioma, souvent confondue avec pituitary
 
 ## Evaluation et suivi
 
@@ -143,18 +196,19 @@ Le projet exporte:
 2. classification report par classe
 3. historique entrainement/validation
 4. resume JSON pour reproductibilite
+5. carte Grad-CAM dans l'interface de prediction
 
 ## Limites actuelles
 
 1. projet pedagogique non certifie medicalement
-2. risque de biais si des images proches se retrouvent a la fois en train et test
+2. risque residuel de biais si des images tres proches mais non identiques se retrouvent a la fois en train et test
 3. heterogeneite des sources Kaggle (qualite d annotation variable)
 4. absence de validation clinique externe
 
 ## Plan d amelioration
 
 1. split plus robuste par groupe patient quand possible
-2. deduplication inter-sources
+2. detection des doublons visuels proches, au-dela des doublons exacts
 3. test de backbones alternatifs (EfficientNet)
 4. calibration et strategie de seuil par classe
 5. analyse approfondie des erreurs meningioma vs pituitary

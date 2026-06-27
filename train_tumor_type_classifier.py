@@ -7,6 +7,7 @@ Classes ciblees:
 """
 
 from pathlib import Path
+import hashlib
 import random
 
 import numpy as np
@@ -267,9 +268,51 @@ def decode_and_resize(path, label):
     return image, tf.cast(label, tf.int32)
 
 
+def _file_hash(path: str) -> str:
+    """Calcule un hash stable du fichier pour detecter les doublons exacts."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def deduplicate_by_file_hash(image_paths, labels):
+    """Supprime les doublons exacts avant le split pour eviter la fuite de donnees."""
+    kept_paths = []
+    kept_labels = []
+    seen_hashes = {}
+    duplicates_removed = 0
+    label_conflicts = 0
+
+    for path, label in zip(image_paths, labels):
+        file_digest = _file_hash(path)
+        label = int(label)
+
+        if file_digest not in seen_hashes:
+            seen_hashes[file_digest] = label
+            kept_paths.append(path)
+            kept_labels.append(label)
+            continue
+
+        duplicates_removed += 1
+        if seen_hashes[file_digest] != label:
+            label_conflicts += 1
+
+    return (
+        np.array(kept_paths),
+        np.array(kept_labels),
+        {
+            "duplicates_removed": int(duplicates_removed),
+            "label_conflicts": int(label_conflicts),
+            "unique_images": int(len(kept_paths)),
+        },
+    )
+
+
 image_paths, labels, source_summaries = load_multiple_tumor_datasets(DATASET_SOURCES)
 
-global_counts = {
+raw_counts = {
     "glioma": int(np.sum(labels == TUMOR_CLASS_TO_INDEX["glioma"])),
     "meningioma": int(np.sum(labels == TUMOR_CLASS_TO_INDEX["meningioma"])),
     "pituitary": int(np.sum(labels == TUMOR_CLASS_TO_INDEX["pituitary"])),
@@ -277,7 +320,24 @@ global_counts = {
 
 print(f"Images tumorales totales: {len(image_paths)}")
 print(
-    f"Distribution -> glioma={global_counts['glioma']} | "
+    f"Distribution -> glioma={raw_counts['glioma']} | "
+    f"meningioma={raw_counts['meningioma']} | pituitary={raw_counts['pituitary']}"
+)
+
+image_paths, labels, dedup_summary = deduplicate_by_file_hash(image_paths, labels)
+global_counts = {
+    "glioma": int(np.sum(labels == TUMOR_CLASS_TO_INDEX["glioma"])),
+    "meningioma": int(np.sum(labels == TUMOR_CLASS_TO_INDEX["meningioma"])),
+    "pituitary": int(np.sum(labels == TUMOR_CLASS_TO_INDEX["pituitary"])),
+}
+print(
+    "Après déduplication exacte -> "
+    f"images uniques: {dedup_summary['unique_images']} | "
+    f"doublons supprimés: {dedup_summary['duplicates_removed']} | "
+    f"conflits de labels: {dedup_summary['label_conflicts']}"
+)
+print(
+    f"Distribution après déduplication -> glioma={global_counts['glioma']} | "
     f"meningioma={global_counts['meningioma']} | pituitary={global_counts['pituitary']}"
 )
 
@@ -297,6 +357,30 @@ X_val_paths, X_test_paths, y_val, y_test = train_test_split(
 )
 
 print(f"Train: {len(X_train_paths)} | Val: {len(X_val_paths)} | Test: {len(X_test_paths)}")
+
+split_summary = {
+    "train": {
+        "num_images": int(len(X_train_paths)),
+        "class_distribution": {
+            class_name: int(np.sum(y_train == class_index))
+            for class_name, class_index in TUMOR_CLASS_TO_INDEX.items()
+        },
+    },
+    "validation": {
+        "num_images": int(len(X_val_paths)),
+        "class_distribution": {
+            class_name: int(np.sum(y_val == class_index))
+            for class_name, class_index in TUMOR_CLASS_TO_INDEX.items()
+        },
+    },
+    "test": {
+        "num_images": int(len(X_test_paths)),
+        "class_distribution": {
+            class_name: int(np.sum(y_test == class_index))
+            for class_name, class_index in TUMOR_CLASS_TO_INDEX.items()
+        },
+    },
+}
 
 class_weights_array = compute_class_weight(
     class_weight="balanced",
@@ -431,7 +515,10 @@ metrics = {
     "f1_macro": float(f1_macro),
     "confusion_matrix": cm.tolist(),
     "class_names": TUMOR_CLASS_NAMES,
+    "deduplication": dedup_summary,
+    "class_distribution_before_deduplication": raw_counts,
     "class_distribution_total": global_counts,
+    "split_summary": split_summary,
     "dataset_sources": source_summaries,
     "classification_report": report,
     "model_path": str(model_path),

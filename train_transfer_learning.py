@@ -10,6 +10,7 @@ Pipeline:
 """
 
 from pathlib import Path
+import hashlib
 import json
 import random
 
@@ -221,18 +222,71 @@ def rebalance_binary_dataset(image_paths, labels, target_ratio=2.0, seed=42):
     return image_paths[selected_idx], labels[selected_idx]
 
 
+def _file_hash(path: str) -> str:
+    """Calcule un hash stable du fichier pour detecter les doublons exacts."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def deduplicate_by_file_hash(image_paths, labels):
+    """Supprime les doublons exacts avant le split pour eviter la fuite de donnees."""
+    kept_paths = []
+    kept_labels = []
+    seen_hashes = {}
+    duplicates_removed = 0
+    label_conflicts = 0
+
+    for path, label in zip(image_paths, labels):
+        file_digest = _file_hash(path)
+        label = int(label)
+
+        if file_digest not in seen_hashes:
+            seen_hashes[file_digest] = label
+            kept_paths.append(path)
+            kept_labels.append(label)
+            continue
+
+        duplicates_removed += 1
+        if seen_hashes[file_digest] != label:
+            label_conflicts += 1
+
+    return (
+        np.array(kept_paths),
+        np.array(kept_labels),
+        {
+            "duplicates_removed": int(duplicates_removed),
+            "label_conflicts": int(label_conflicts),
+            "unique_images": int(len(kept_paths)),
+        },
+    )
+
+
 image_paths, labels, source_summaries = load_multiple_datasets(DATASET_SOURCES)
-total_tumor = int(np.sum(labels == 1))
-total_no_tumor = int(np.sum(labels == 0))
+raw_tumor = int(np.sum(labels == 1))
+raw_no_tumor = int(np.sum(labels == 0))
 
 print(f"Images totales trouvées: {len(image_paths)}")
-print(f"Tumeurs: {total_tumor} | Sans tumeur: {total_no_tumor}")
+print(f"Tumeurs: {raw_tumor} | Sans tumeur: {raw_no_tumor}")
 print("Détail par source:")
 for source_name, summary in source_summaries.items():
     print(
         f"- {source_name}: total={summary['num_images']}, "
         f"tumor={summary['tumor']}, no_tumor={summary['no_tumor']}"
     )
+
+image_paths, labels, dedup_summary = deduplicate_by_file_hash(image_paths, labels)
+dedup_tumor = int(np.sum(labels == 1))
+dedup_no_tumor = int(np.sum(labels == 0))
+print(
+    "Après déduplication exacte -> "
+    f"images uniques: {dedup_summary['unique_images']} | "
+    f"doublons supprimés: {dedup_summary['duplicates_removed']} | "
+    f"conflits de labels: {dedup_summary['label_conflicts']}"
+)
+print(f"Distribution après déduplication -> Tumeurs: {dedup_tumor} | Sans tumeur: {dedup_no_tumor}")
 
 image_paths, labels = rebalance_binary_dataset(
     image_paths,
@@ -447,9 +501,14 @@ metrics = {
     },
     "dataset_sources": source_summaries,
     "num_images_total": int(len(image_paths)),
-    "class_distribution_before_rebalance": {
-        "tumor": total_tumor,
-        "no_tumor": total_no_tumor,
+    "deduplication": dedup_summary,
+    "class_distribution_before_deduplication": {
+        "tumor": raw_tumor,
+        "no_tumor": raw_no_tumor,
+    },
+    "class_distribution_after_deduplication": {
+        "tumor": dedup_tumor,
+        "no_tumor": dedup_no_tumor,
     },
     "class_distribution_total": {
         "tumor": balanced_tumor,

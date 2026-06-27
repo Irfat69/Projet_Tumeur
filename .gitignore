@@ -35,6 +35,8 @@ dist/
 # Project artifacts
 models/
 outputs/
+data_tumeur.json
+build_json.py
 *.keras
 *.h5
 *.hdf5

@@ -53,9 +53,6 @@ Modeles `.keras` sauvegardes.
 8. `outputs/`
 Metriques JSON et graphes d entrainement.
 
-9. `data_tumeur.json`
-Contenu structure pour integration dans un portfolio.
-
 ## Installation
 
 1. Cloner le depot

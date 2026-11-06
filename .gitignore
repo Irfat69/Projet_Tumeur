@@ -35,8 +35,24 @@ dist/
 # Project artifacts
 models/
 outputs/
-data_tumeur.json
-build_json.py
+# Personal drafting and one-off audit utilities stay local.
+/scripts/
+/docs/
+/configs/
+data/
+datasets/
+external_data/
+*.nii
+*.nii.gz
+*.dcm
+*.mat
+*.npz
+*.npy
+*.zip
+*.key
+*.pem
+kaggle.json
+.secrets/
 *.keras
 *.h5
 *.hdf5

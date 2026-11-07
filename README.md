@@ -32,9 +32,18 @@ Linux/WSL commands are shown. On Windows, activate the environment with `venv\Sc
 
 </details>
 
-![Actual Gradio application](https://github.com/Irfat69/Projet_Tumeur/releases/download/gradio-demo-v3/gradio_demo_desktop.png)
+## Application preview
+
+![Desktop MRI analysis with Grad-CAM and model prediction](https://github.com/Irfat69/Projet_Tumeur/releases/download/gradio-demo-v3/gradio_demo_desktop.png)
 
 This authentic example is annotated **meningioma** and predicted **glioma**; it was selected without searching for a successful prediction. The image derives from Jun Cheng’s [Figshare dataset](https://doi.org/10.6084/m9.figshare.1512427), retrieved through the pinned Kaggle mirror. The screenshot is shared under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+<details>
+<summary><strong>View the image upload interface</strong></summary>
+
+![Desktop interface before uploading an MRI image](https://github.com/Irfat69/Projet_Tumeur/releases/download/gradio-demo-v3/gradio_demo_upload.png)
+
+</details>
 
 ## Scope and scientific limits
 

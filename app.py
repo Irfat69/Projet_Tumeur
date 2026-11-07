@@ -17,6 +17,7 @@ from PIL import Image
 
 from brain_tumor.inference import generate_gradcam, predict_probabilities
 from brain_tumor.artifacts import demo_registry, ensure_demo_models
+from brain_tumor.preprocessing import validate_image
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -56,6 +57,11 @@ BINARY_METRICS_FILE = (
 BINARY_MODEL_NAME = "brain_tumor_transfer_grouped"
 TYPE_MODEL_NAME = "brain_tumor_type_grouped"
 TYPE_CLASS_NAMES = ["glioma", "meningioma", "pituitary"]
+TYPE_DISPLAY_NAMES = {
+    "glioma": "Gliome",
+    "meningioma": "Méningiome",
+    "pituitary": "Tumeur hypophysaire",
+}
 
 GRADCAM_ALPHA = 0.52
 
@@ -174,42 +180,52 @@ def build_result_html(
     threshold,
     tumor_type_label=None,
     tumor_type_confidence=None,
-    gradcam_target="modele binaire",
+    gradcam_target="modèle binaire",
 ):
-    status_class = "danger" if has_tumor else "safe"
-    badge = "CLASSE DU MODELE : TUMEUR" if has_tumor else "CLASSE DU MODELE : SANS TUMEUR"
     title = "Motif tumoral prédit" if has_tumor else "Motif non tumoral prédit"
-
     type_line = ""
     if tumor_type_label is not None:
+        label = html.escape(TYPE_DISPLAY_NAMES.get(tumor_type_label, tumor_type_label))
+        raw_label = html.escape(tumor_type_label, quote=True)
+        score = f"{tumor_type_confidence * 100:.1f}".replace(".", ",")
         type_line = (
-            "<div class='result-row emphasis'>"
-            "<span>Type prédit, conditionnel à la classe tumeur</span>"
-            f"<strong>{tumor_type_label} · {tumor_type_confidence * 100:.2f}%</strong>"
-            "</div>"
+            f"<div class='predicted-type' data-class='{raw_label}'>"
+            f"<span>Type prédit</span><strong>{label}</strong>"
+            f"<span>Score du type : {score} % · parmi les tumeurs</span></div>"
         )
     elif has_tumor:
-        type_line = "<p>Modèle des types indisponible : consulter la configuration du README.</p>"
-
+        type_line = (
+            "<p>Classification du type indisponible. La prédiction binaire reste affichée.</p>"
+        )
+    else:
+        type_line = "<p>La classification du type n’est pas appliquée à cette prédiction.</p>"
+    target = gradcam_target
+    for raw, display in TYPE_DISPLAY_NAMES.items():
+        target = target.replace("classe " + raw, "classe " + display.lower())
+    score = f"{confidence * 100:.1f}".replace(".", ",")
     return (
-        f"<section class='result-card {status_class}'>"
-        f"<div class='badge'>{badge}</div>"
+        "<section class='result-card' aria-label='Résultat du modèle'>"
+        "<p class='result-status'><span class='status-dot' aria-hidden='true'></span>Analyse terminée</p>"
         f"<h2>{title}</h2>"
-        "<div class='result-row'>"
-        "<span>Score de la classe (non calibré)</span>"
-        f"<strong>{confidence * 100:.2f}%</strong>"
-        "</div>"
-        "<div class='result-row'>"
-        "<span>Score tumeur</span>"
-        f"<strong>{probability:.4f}</strong>"
-        "</div>"
-        "<div class='result-row'>"
-        "<span>Seuil utilise</span>"
-        f"<strong>{threshold:.2f}</strong>"
-        "</div>"
         f"{type_line}"
-        f"<p>Grad-CAM: {gradcam_target}</p>"
+        "<div class='model-score'><span>Score de la prédiction binaire</span>"
+        f"<strong>{score} %</strong></div>"
+        "<p class='score-caption'>Score non calibré, sans interprétation clinique.</p>"
+        "<details class='decision-details'><summary>Détails de la décision</summary>"
+        f"<p>Score tumoral : {probability:.4f} · seuil binaire : {threshold:.2f}.</p>"
+        f"<p>Grad-CAM : {html.escape(target)}.</p></details>"
         "</section>"
+    )
+
+
+def error_html(message):
+    if message == "Image dimensions must be at least 16 px and at most 25 megapixels.":
+        message = "Utilisez une image d’au moins 16 × 16 pixels et de 25 mégapixels maximum."
+    return (
+        "<section class='result-card result-error' role='alert'>"
+        "<p class='result-status'>Vérification nécessaire</p>"
+        "<h2>Analyse impossible</h2>"
+        f"<p>{html.escape(message)}</p></section>"
     )
 
 
@@ -273,206 +289,350 @@ def predict_irm(image: Image.Image):
             if isinstance(error, (ValueError, FileNotFoundError))
             else "Prédiction impossible. Vérifie les modèles et consulte les journaux du serveur."
         )
-        return (
-            "<section class='result-card danger'>"
-            "<div class='badge'>ERREUR</div>"
-            "<h2>Analyse impossible</h2>"
-            f"<p>{html.escape(message)}</p>"
-            "</section>",
-            None,
-            None,
-            None,
-        )
+        return error_html(message), None, None, None
+
+
+EMPTY_RESULT = (
+    "<section class='empty-result' role='status'>"
+    "<p class='result-status'>En attente d’une image</p>"
+    "<h2>Votre analyse apparaîtra ici.</h2>"
+    "<p>Importez une image, puis lancez l’analyse pour explorer la prédiction du modèle.</p>"
+    "</section>"
+)
+READY_RESULT = (
+    "<section class='empty-result' role='status'>"
+    "<p class='result-status'>Image importée</p>"
+    "<h2>Prête à être analysée.</h2>"
+    "<p>Le modèle affichera sa prédiction et une visualisation Grad-CAM.</p>"
+    "</section>"
+)
+
+
+def interface_updates(result, binary=None, types=None, cam=None, *, ready=False, clear=False):
+    """Adapt model outputs to the UI without changing scientific class keys."""
+    display_types = {
+        TYPE_DISPLAY_NAMES.get(key, key): value for key, value in (types or {}).items()
+    }
+    display_binary = (
+        {"Motif non tumoral": binary["Aucune tumeur"], "Motif tumoral": binary["Tumeur"]}
+        if binary is not None
+        else None
+    )
+    return (
+        result,
+        display_binary,
+        display_types or None,
+        cam,
+        gr.update(
+            value="Analyser l’image",
+            interactive=ready,
+        ),
+        gr.update(interactive=clear),
+    )
+
+
+def reset_analysis(image, session=None):
+    """Invalidate previous results whenever the selected input changes."""
+    if session is not None:
+        session["revision"] += 1
+    if image is None:
+        return interface_updates(EMPTY_RESULT)
+    try:
+        validate_image(image)
+    except ValueError as error:
+        return interface_updates(error_html(str(error)), clear=True)
+    return interface_updates(READY_RESULT, ready=True, clear=True)
+
+
+def clear_interface(session=None):
+    return (gr.update(value=None), *reset_analysis(None, session))
+
+
+def analyze_interface(image, session=None):
+    """Never attach a completed prediction to an input replaced during inference."""
+    revision = session["revision"] if session is not None else None
+    result, binary, types, cam = predict_irm(image)
+    if session is not None and session["revision"] != revision:
+        return tuple(gr.skip() for _ in range(6))
+    return interface_updates(
+        result, binary, types, cam, ready=image is not None, clear=image is not None
+    )
+
+
+def model_status_html():
+    if binary_model is not None and tumor_type_model is not None:
+        message = "Modèles prêts"
+    elif binary_model is not None:
+        message = "Détection binaire disponible"
+    else:
+        message = "Modèles à initialiser au lancement"
+    dot = "<span class='status-dot' aria-hidden='true'></span>" if binary_model is not None else ""
+    return (
+        "<div class='runtime-status' role='status'>"
+        f"{dot}{message}<span class='model-name'>MobileNetV2</span></div>"
+    )
+
+
+def page_header_html():
+    return (
+        "<header class='app-header'><div>"
+        "<div class='app-brand'>Brain MRI</div>"
+        "<h1>Explorer une IRM cérébrale.</h1>"
+        "<p>Détection de tumeurs, classification et Grad-CAM.</p></div>"
+        "<a class='source-link' href='https://github.com/Irfat69/Projet_Tumeur' "
+        "target='_blank' rel='noopener noreferrer'>Voir sur GitHub ↗</a></header>"
+        "<p class='research-notice'><strong>Démonstration pédagogique, sans validation clinique.</strong> "
+        "Les scores ne sont pas des probabilités cliniques ; Grad-CAM n’est pas une localisation médicale validée.</p>"
+        + model_status_html()
+    )
+
+
+def interface_theme():
+    tokens = {
+        "body_background_fill": "#0c161c",
+        "body_text_color": "#edf3f5",
+        "body_text_color_subdued": "#acbdc7",
+        "background_fill_primary": "#14232c",
+        "background_fill_secondary": "#101d25",
+        "border_color_primary": "#304651",
+        "border_color_accent": "#74d4b0",
+        "block_background_fill": "#14232c",
+        "block_border_color": "#304651",
+        "block_label_background_fill": "#14232c",
+        "block_label_text_color": "#b8c9d1",
+        "input_background_fill": "#0c171e",
+        "input_border_color": "#3a535e",
+        "input_placeholder_color": "#b4c4ce",
+        "button_primary_background_fill": "#74d4b0",
+        "button_primary_background_fill_hover": "#96e2c6",
+        "button_primary_text_color": "#0b261d",
+        "button_primary_text_color_hover": "#0b261d",
+        "button_secondary_background_fill": "#1a2c36",
+        "button_secondary_background_fill_hover": "#263e49",
+        "button_secondary_text_color": "#edf3f5",
+        "button_secondary_text_color_hover": "#edf3f5",
+    }
+    return gr.themes.Base(
+        primary_hue="emerald",
+        neutral_hue="slate",
+        font=["system-ui", "Segoe UI", "sans-serif"],
+        font_mono=["ui-monospace", "monospace"],
+    ).set(**tokens, **{key + "_dark": value for key, value in tokens.items()})
 
 
 custom_css = """
-:root {
-    --bg-start: #0b1220;
-    --bg-end: #0f2f2d;
-    --panel: rgba(10, 15, 26, 0.72);
-    --panel-border: rgba(255, 255, 255, 0.15);
-    --text: #f4f7fb;
-    --muted: #b8c2cf;
-    --accent: #21c78a;
-    --danger: #ff7b6b;
-    --danger-bg: rgba(255, 123, 107, 0.15);
-    --safe-bg: rgba(33, 199, 138, 0.15);
-}
-
 .gradio-container {
-    background: radial-gradient(circle at 10% 10%, #16304c, transparent 35%),
-                radial-gradient(circle at 90% 15%, #1b4a47, transparent 30%),
-                linear-gradient(140deg, var(--bg-start), var(--bg-end));
-    color: var(--text);
-    font-family: "Segoe UI", system-ui, sans-serif;
+    --page: #0c161c;
+    --surface: #14232c;
+    --line: #304651;
+    --ink: #edf3f5;
+    --quiet: #acbdc7;
+    --mint: #74d4b0;
+    max-width: 1180px !important;
+    margin: 0 auto !important;
+    padding: clamp(20px, 3vw, 32px) clamp(16px, 2.5vw, 28px) 24px !important;
+    background: var(--page);
+    color: var(--ink);
 }
-
-.hero {
-    background: linear-gradient(120deg, rgba(20, 29, 45, 0.86), rgba(14, 57, 54, 0.86));
-    border: 1px solid var(--panel-border);
-    border-radius: 18px;
-    padding: 18px 20px;
-    margin-bottom: 12px;
-    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.25);
+.gradio-container > .main { padding: 0 !important; }
+.app-html, .app-html .html-container { padding: 0 !important; background: transparent !important; border: 0 !important; }
+.app-header { display: flex; align-items: start; justify-content: space-between; gap: 24px; padding-bottom: 18px; }
+.app-brand { margin: 0 0 12px; font-size: 16px; font-weight: 650; color: var(--mint); }
+.app-header h1 { margin: 0 0 10px; color: var(--ink); font-size: clamp(26px, 3.2vw, 36px); font-weight: 600; line-height: 1.2; letter-spacing: -0.025em; }
+.app-header p { margin: 0; color: var(--quiet); font-size: 15px; line-height: 1.6; }
+.source-link { flex-shrink: 0; padding: 10px 0; color: var(--quiet) !important; font-size: 14px; text-decoration: none; }
+.source-link:hover { color: var(--mint) !important; text-decoration: underline; }
+.research-notice { color: var(--quiet); font-size: 13px; line-height: 1.7; margin: 0 0 16px; }
+.research-notice strong { color: var(--ink); font-weight: 600; }
+.runtime-status { display: flex; align-items: center; gap: 9px; color: var(--quiet); font-size: 13px; padding: 0 0 4px; }
+.status-dot { display: inline-block; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--mint); }
+.model-name { margin-left: auto; }
+#workspace { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 24px; gap: 28px; align-items: flex-start; }
+#viewer { gap: 14px; }
+#viewer-tabs { border: 0; }
+#viewer-tabs [role="tab"] { min-height: 44px; padding: 10px 14px; font-size: 14px; }
+#viewer-tabs [role="tabpanel"] { padding: 14px 0 0; border: 0; }
+#mri-input, #cam-output { border: 1px solid var(--line); border-radius: 12px; background: #080f14; }
+#mri-input img, #cam-output img { object-fit: contain; }
+#input-actions { gap: 10px; }
+#input-actions button { min-height: 46px; border-radius: 10px; font-size: 14px; font-weight: 600; }
+#predict-btn { background: var(--mint); color: #0b261d; }
+#predict-btn:hover:not(:disabled) { background: #96e2c6; }
+#predict-btn:disabled { opacity: 1; background: #263b44; color: #b8cbd3; border-color: #36505b; cursor: not-allowed; }
+#clear-btn:disabled { opacity: 0.65; }
+.gradio-container button:focus-visible, .gradio-container a:focus-visible, .gradio-container summary:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
+.input-note p, .explanation-note p { margin: 0; color: var(--quiet); font-size: 12px; line-height: 1.7; }
+#results-panel { border-left: 1px solid var(--line); padding-left: 28px; gap: 22px; }
+#result-region { border: 0; background: transparent; padding: 0; }
+.result-card, .empty-result { padding: 0; color: var(--ink); }
+.result-status { display: flex; align-items: center; gap: 9px; margin: 4px 0 14px; color: var(--quiet); font-size: 13px; }
+.result-card h2, .empty-result h2 { color: var(--ink); font-size: 25px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; margin: 0 0 16px; }
+.empty-result { min-height: 230px; padding-top: 10px; }
+.empty-result p:not(.result-status), .result-card > p:not(.result-status) { color: var(--quiet); font-size: 14px; line-height: 1.7; max-width: 45ch; }
+.predicted-type { display: flex; flex-direction: column; gap: 5px; margin: 0 0 22px; color: var(--quiet); font-size: 13px; }
+.predicted-type strong { color: var(--mint); font-size: 22px; font-weight: 600; }
+.model-score { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 14px; }
+.model-score span { color: var(--quiet); }
+.model-score strong { color: var(--ink); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.score-caption { margin: 6px 0 0 !important; font-size: 12px !important; }
+.decision-details { margin-top: 16px; color: var(--quiet); font-size: 12px; line-height: 1.7; }
+.decision-details summary { cursor: pointer; padding: 5px 0; }
+.decision-details p { margin: 6px 0 0; }
+.result-error .result-status { color: #f4bc8a; }
+.score-panel { display: none !important; border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+#workspace:has(.result-card:not(.result-error)) #binary-scores, #workspace:has(.predicted-type) #type-scores { display: block !important; }
+.score-panel label { color: var(--quiet) !important; font-size: 13px !important; }
+#reading-guide { margin-top: 12px; border-color: var(--line); border-radius: 12px; background: transparent; }
+#reading-guide .prose { color: var(--quiet); font-size: 13px; line-height: 1.8; }
+#reading-guide .prose strong { color: var(--ink); }
+@media (max-width: 760px) {
+    .app-header { gap: 12px; padding-bottom: 18px; }
+    .app-header h1 { max-width: 18ch; }
+    .source-link { font-size: 12px; }
+    #workspace { padding: 16px; gap: 22px; flex-direction: column; }
+    #viewer, #results-panel { flex: none !important; min-width: 0 !important; width: 100% !important; max-width: 100%; }
+    #results-panel { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 22px; }
+    #mri-input, #cam-output { height: 300px !important; }
+    .empty-result { min-height: 130px; }
+    .result-card h2, .empty-result h2 { font-size: 23px; }
 }
-
-.hero h1 {
-    margin: 0 0 8px 0;
-    color: var(--text);
-    font-size: 1.7rem;
-    letter-spacing: 0;
+@media (prefers-reduced-motion: reduce) {
+    .gradio-container *, .gradio-container *::before, .gradio-container *::after { scroll-behavior: auto !important; }
 }
-
-.hero p {
-    margin: 4px 0;
-    color: var(--muted);
-}
-
-.panel {
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 14px;
-    padding: 14px;
-    backdrop-filter: blur(4px);
-}
-
-.result-card {
-    border: 1px solid var(--panel-border);
-    border-radius: 14px;
-    padding: 14px;
-}
-
-.result-card.safe {
-    background: var(--safe-bg);
-}
-
-.result-card.danger {
-    background: var(--danger-bg);
-}
-
-.result-card h2 {
-    margin: 10px 0 12px 0;
-    color: var(--text);
-    font-size: 1.2rem;
-    letter-spacing: 0;
-}
-
-.result-card p {
-    margin: 10px 0 0 0;
-    color: var(--muted);
-}
-
-.badge {
-    display: inline-block;
-    padding: 3px 9px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.18);
-    font-size: 0.76rem;
-    font-weight: 700;
-    letter-spacing: 0;
-}
-
-.result-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 7px 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.13);
-    color: var(--muted);
-}
-
-.result-row strong {
-    color: var(--text);
-    text-align: right;
-}
-
-.result-row.emphasis strong {
-    color: var(--accent);
-}
-
-#predict-btn {
-    border: none !important;
-    background: linear-gradient(120deg, #20bb83, #17a49d) !important;
-    color: #ffffff !important;
-    font-weight: 700;
-}
-
-#predict-btn:hover {
-    filter: brightness(1.08);
-}
-
-.result-card .result-row span, .mri-note p, .mri-note strong {
-    color: #c4d2db;
-}
-
-.result-card .badge {
-    color: #f4f7fb;
-}
-
-.footer-note {
-    font-size: 0.9rem;
-    color: var(--muted);
-}
-
 """
 
 
-with gr.Blocks(title="Détection de tumeur cérébrale - Portfolio") as demo:
-    gr.Markdown(
-        """
-        <div class='hero'>
-            <h1>Détection IRM - Tumeur Cérébrale</h1>
-            <p>Démonstration de classification binaire, de type tumoral et de Grad-CAM.</p>
-            <p class='footer-note'>Prototype pédagogique, sans validation clinique. Les scores ne sont pas des probabilités cliniques ; Grad-CAM ne localise pas une tumeur de manière validée.</p>
-        </div>
-        """
+with gr.Blocks(title="Brain MRI — Démonstration de classification") as demo:
+    page_header = gr.HTML(
+        value=page_header_html, apply_default_css=False, elem_classes=["app-html"]
     )
-
-    with gr.Row():
-        with gr.Column(elem_classes=["panel"], scale=6):
-            image_input = gr.Image(type="pil", label="Image IRM", sources=["upload"], height=380)
-            gradcam_output = gr.Image(
-                type="pil",
-                label="Grad-CAM — attribution exploratoire, pas une segmentation",
-                height=300,
-            )
+    with gr.Row(elem_id="workspace"):
+        with gr.Column(scale=6, min_width=280, elem_id="viewer"):
+            with gr.Tabs(selected="source", elem_id="viewer-tabs") as viewer_tabs:
+                with gr.Tab("Image IRM", id="source"):
+                    image_input = gr.Image(
+                        type="pil",
+                        format="png",
+                        label="Image IRM à analyser",
+                        show_label=False,
+                        sources=["upload"],
+                        height=360,
+                        elem_id="mri-input",
+                        placeholder="Déposez une image ou cliquez pour l’importer",
+                        buttons=["fullscreen"],
+                    )
+                with gr.Tab("Grad-CAM", id="explanation", render_children=True):
+                    gradcam_output = gr.Image(
+                        type="pil",
+                        format="png",
+                        label="Attribution exploratoire Grad-CAM",
+                        show_label=False,
+                        interactive=False,
+                        height=360,
+                        elem_id="cam-output",
+                        buttons=["fullscreen", "download"],
+                        placeholder="La carte apparaît après une analyse",
+                    )
+                    gr.Markdown(
+                        "Cette carte illustre l’attribution du modèle. Elle ne délimite pas une tumeur.",
+                        elem_classes=["explanation-note"],
+                    )
+            with gr.Row(elem_id="input-actions"):
+                predict_button = gr.Button(
+                    "Analyser l’image",
+                    variant="primary",
+                    interactive=False,
+                    elem_id="predict-btn",
+                    scale=3,
+                    min_width=160,
+                )
+                clear_button = gr.Button(
+                    "Effacer", interactive=False, elem_id="clear-btn", scale=1, min_width=80
+                )
             gr.Markdown(
-                f"Seuil fixé sur validation : **{CALIBRATED_THRESHOLD:.2f}**. Aucun réglage sur le test."
-                if CALIBRATED_THRESHOLD is not None
-                else "Modèles ou métadonnées absents : consulter les instructions du README.",
-                elem_classes=["mri-note"],
+                "Utilisez une image anonymisée. PNG ou JPEG conseillés.",
+                elem_classes=["input-note"],
             )
-            gr.Markdown(
-                "Importer une IRM anonymisée. L'application ne vérifie pas automatiquement le domaine de l'image et ne rejette pas les images hors distribution.",
-                elem_classes=["mri-note"],
+        with gr.Column(scale=5, min_width=280, elem_id="results-panel"):
+            result_output = gr.HTML(
+                value=EMPTY_RESULT,
+                elem_id="result-region",
+                apply_default_css=False,
+                elem_classes=["app-html"],
             )
-
-        with gr.Column(elem_classes=["panel"], scale=5):
-            result_output = gr.HTML(label="Résultat")
-            probability_output = gr.Label(label="Scores du modèle binaire (non calibrés)")
-            tumor_type_output = gr.Label(label="Scores des types (parmi les tumeurs seulement)")
-
-    with gr.Row():
-        predict_button = gr.Button("Analyser l'image", elem_id="predict-btn", variant="primary")
-        clear_button = gr.Button("Réinitialiser", variant="secondary")
-
-    predict_button.click(
-        fn=predict_irm,
-        inputs=[image_input],
-        outputs=[result_output, probability_output, tumor_type_output, gradcam_output],
+            probability_output = gr.Label(
+                label="Scores binaires · non calibrés",
+                show_heading=False,
+                num_top_classes=2,
+                elem_id="binary-scores",
+                color="#74d4b0",
+                elem_classes=["score-panel"],
+            )
+            tumor_type_output = gr.Label(
+                label="Scores par type · parmi les tumeurs",
+                show_heading=False,
+                num_top_classes=3,
+                elem_id="type-scores",
+                color="#74d4b0",
+                elem_classes=["score-panel"],
+            )
+    with gr.Accordion(
+        "Comprendre les résultats et les limites", open=False, elem_id="reading-guide"
+    ):
+        gr.Markdown(
+            "Le modèle prédit **tumeur / sans tumeur**, puis un type (**gliome, méningiome ou tumeur hypophysaire**) "
+            "uniquement si la classe tumeur est retenue. Le seuil binaire est choisi sur validation et reste fixe.\n\n"
+            "Un score élevé ne garantit ni une prédiction correcte ni une probabilité clinique fiable. "
+            "L’application ne vérifie pas qu’un fichier représente une IRM et ne rejette pas toutes les images hors distribution. "
+            "Grad-CAM reste une attribution exploratoire. **Cette démonstration ne fournit aucun diagnostic médical.**\n\n"
+            "[Modèles et évaluation scientifique](https://github.com/Irfat69/Projet_Tumeur/releases/tag/gradio-demo-v3)."
+        )
+    analysis_session = gr.State({"revision": 0})
+    ui_outputs = [
+        result_output,
+        probability_output,
+        tumor_type_output,
+        gradcam_output,
+        predict_button,
+        clear_button,
+    ]
+    analysis_event = predict_button.click(
+        fn=analyze_interface,
+        inputs=[image_input, analysis_session],
+        outputs=ui_outputs,
         concurrency_limit=1,
+        show_progress="full",
+        trigger_mode="once",
+    )
+    image_input.upload(
+        fn=reset_analysis,
+        inputs=[image_input, analysis_session],
+        outputs=ui_outputs,
+        queue=False,
+        cancels=[analysis_event],
+    )
+    image_input.clear(
+        fn=reset_analysis,
+        inputs=[image_input, analysis_session],
+        outputs=ui_outputs,
+        queue=False,
+        cancels=[analysis_event],
     )
     clear_button.click(
-        fn=lambda: (None, "", None, None, None),
-        inputs=None,
-        outputs=[image_input, result_output, probability_output, tumor_type_output, gradcam_output],
+        fn=clear_interface,
+        inputs=[analysis_session],
+        outputs=[image_input, *ui_outputs],
+        queue=False,
+        cancels=[analysis_event],
+        js="(...args) => { document.querySelector('#viewer-tabs [role=tab]')?.click(); return args; }",
     )
+    demo.load(fn=page_header_html, outputs=[page_header], queue=False)
 
 
 if __name__ == "__main__":
     initialize_models()
     server_port = os.environ.get("GRADIO_SERVER_PORT")
-    launch_kwargs = {"theme": gr.themes.Soft(), "css": custom_css}
+    launch_kwargs = {"theme": interface_theme(), "css": custom_css, "footer_links": []}
     if server_port:
         launch_kwargs["server_port"] = int(server_port)
     demo.launch(**launch_kwargs)

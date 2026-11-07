@@ -12,6 +12,8 @@ python app.py
 
 Open the local URL printed in the terminal, normally **http://127.0.0.1:7860**. Upload an anonymized image and click **Analyser l’image**.
 
+The interface is designed for a **PC browser**, with the MRI and Grad-CAM shown side by side. A window width of at least 1280 pixels is recommended.
+
 The first launch downloads about **42 MB** of pretrained models from this repository’s release and verifies their SHA-256 hashes. Later launches reuse the local files. **No training, dataset download or GPU is required to try the demo.** An internet connection is needed for the first model download.
 
 <details>
@@ -30,7 +32,7 @@ Linux/WSL commands are shown. On Windows, activate the environment with `venv\Sc
 
 </details>
 
-![Actual Gradio application](https://github.com/Irfat69/Projet_Tumeur/releases/download/gradio-demo-v3/gradio_demo_ui.png)
+![Actual Gradio application](https://github.com/Irfat69/Projet_Tumeur/releases/download/gradio-demo-v3/gradio_demo_desktop.png)
 
 This authentic example is annotated **meningioma** and predicted **glioma**; it was selected without searching for a successful prediction. The image derives from Jun Cheng’s [Figshare dataset](https://doi.org/10.6084/m9.figshare.1512427), retrieved through the pinned Kaggle mirror. The screenshot is shared under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 

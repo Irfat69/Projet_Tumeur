@@ -295,8 +295,11 @@ def predict_irm(image: Image.Image):
 EMPTY_RESULT = (
     "<section class='empty-result' role='status'>"
     "<p class='result-status'>En attente d’une image</p>"
-    "<h2>Votre analyse apparaîtra ici.</h2>"
-    "<p>Importez une image, puis lancez l’analyse pour explorer la prédiction du modèle.</p>"
+    "<h2>Une image, deux étapes d’analyse.</h2>"
+    "<p>Importez une IRM puis lancez l’analyse.</p>"
+    "<dl class='analysis-outline'><div><dt>Détection binaire</dt>"
+    "<dd>Motif tumoral ou non tumoral</dd></div><div><dt>Classification du type</dt>"
+    "<dd>Gliome, méningiome ou tumeur hypophysaire, si un motif tumoral est prédit.</dd></div></dl>"
     "</section>"
 )
 READY_RESULT = (
@@ -367,149 +370,179 @@ def model_status_html():
     else:
         message = "Modèles à initialiser au lancement"
     dot = "<span class='status-dot' aria-hidden='true'></span>" if binary_model is not None else ""
-    return (
-        "<div class='runtime-status' role='status'>"
-        f"{dot}{message}<span class='model-name'>MobileNetV2</span></div>"
-    )
+    return f"<div class='runtime-status' role='status'>{dot}{message}</div>"
 
 
 def page_header_html():
     return (
-        "<header class='app-header'><div>"
-        "<div class='app-brand'>Brain MRI</div>"
-        "<h1>Explorer une IRM cérébrale.</h1>"
-        "<p>Détection de tumeurs, classification et Grad-CAM.</p></div>"
-        "<a class='source-link' href='https://github.com/Irfat69/Projet_Tumeur' "
-        "target='_blank' rel='noopener noreferrer'>Voir sur GitHub ↗</a></header>"
-        "<p class='research-notice'><strong>Démonstration pédagogique, sans validation clinique.</strong> "
-        "Les scores ne sont pas des probabilités cliniques ; Grad-CAM n’est pas une localisation médicale validée.</p>"
+        "<header class='app-header'><div class='brand-group'>"
+        "<svg class='brand-mark' viewBox='0 0 32 32' fill='none' aria-hidden='true'>"
+        "<rect x='4' y='4' width='24' height='24' rx='8' stroke='currentColor'/>"
+        "<ellipse cx='16' cy='16' rx='7' ry='10' stroke='currentColor'/>"
+        "<path d='M6 16h20M16 6v20' stroke='currentColor'/></svg>"
+        "<span class='app-brand'>Brain MRI</span>"
+        "<span class='brand-description'>Computer vision · MobileNetV2</span></div>"
+        "<div class='header-links'>"
         + model_status_html()
+        + "<a class='source-link' href='https://github.com/Irfat69/Projet_Tumeur' "
+        "target='_blank' rel='noopener noreferrer'>Code sur GitHub ↗</a></div></header>"
+        "<div class='page-intro'><div><h1>Détection de tumeurs cérébrales</h1>"
+        "<p>Importez une IRM pour consulter la prédiction du modèle et son attribution Grad-CAM.</p></div>"
+        "<a class='evaluation-link' "
+        "href='https://github.com/Irfat69/Projet_Tumeur/releases/tag/gradio-demo-v3' "
+        "target='_blank' rel='noopener noreferrer'>Consulter l’évaluation ↗</a></div>"
+        "<p class='research-notice'><strong>Démonstration pédagogique.</strong> "
+        "Sans validation clinique ; ne fournit aucun diagnostic médical.</p>"
     )
 
 
 def interface_theme():
     tokens = {
-        "body_background_fill": "#0c161c",
-        "body_text_color": "#edf3f5",
-        "body_text_color_subdued": "#acbdc7",
-        "background_fill_primary": "#14232c",
-        "background_fill_secondary": "#101d25",
-        "border_color_primary": "#304651",
-        "border_color_accent": "#74d4b0",
-        "block_background_fill": "#14232c",
-        "block_border_color": "#304651",
-        "block_label_background_fill": "#14232c",
-        "block_label_text_color": "#b8c9d1",
-        "input_background_fill": "#0c171e",
-        "input_border_color": "#3a535e",
-        "input_placeholder_color": "#b4c4ce",
-        "button_primary_background_fill": "#74d4b0",
-        "button_primary_background_fill_hover": "#96e2c6",
-        "button_primary_text_color": "#0b261d",
-        "button_primary_text_color_hover": "#0b261d",
-        "button_secondary_background_fill": "#1a2c36",
-        "button_secondary_background_fill_hover": "#263e49",
-        "button_secondary_text_color": "#edf3f5",
-        "button_secondary_text_color_hover": "#edf3f5",
+        "body_background_fill": "#111516",
+        "body_text_color": "#edf1ef",
+        "body_text_color_subdued": "#aab5b1",
+        "background_fill_primary": "#1a2021",
+        "background_fill_secondary": "#151a1b",
+        "border_color_primary": "#35403c",
+        "border_color_accent": "#9bd6c1",
+        "block_background_fill": "#1a2021",
+        "block_border_color": "#35403c",
+        "block_label_background_fill": "#1a2021",
+        "block_label_text_color": "#aab5b1",
+        "input_background_fill": "#0c1011",
+        "input_border_color": "#35403c",
+        "input_placeholder_color": "#aab5b1",
+        "button_primary_background_fill": "#9bd6c1",
+        "button_primary_background_fill_hover": "#b7e4d3",
+        "button_primary_text_color": "#142d24",
+        "button_primary_text_color_hover": "#142d24",
+        "button_secondary_background_fill": "#262e2c",
+        "button_secondary_background_fill_hover": "#333e39",
+        "button_secondary_text_color": "#edf1ef",
+        "button_secondary_text_color_hover": "#edf1ef",
     }
     return gr.themes.Base(
         primary_hue="emerald",
         neutral_hue="slate",
-        font=["system-ui", "Segoe UI", "sans-serif"],
+        font=[gr.themes.GoogleFont("Manrope", weights=[400, 500, 600]), "Segoe UI", "sans-serif"],
         font_mono=["ui-monospace", "monospace"],
     ).set(**tokens, **{key + "_dark": value for key, value in tokens.items()})
 
 
+# Desktop workbench: compare the input and attribution at the same scale, beside
+# a fixed results rail. Charcoal surfaces, restrained mint, native Gradio controls.
+# Intended for PC demonstration; no mobile breakpoint or alternate mobile layout.
 custom_css = """
 .gradio-container {
-    --page: #0c161c;
-    --surface: #14232c;
-    --line: #304651;
-    --ink: #edf3f5;
-    --quiet: #acbdc7;
-    --mint: #74d4b0;
-    max-width: 1180px !important;
+    --page: #111516;
+    --surface: #1a2021;
+    --line: #35403c;
+    --ink: #edf1ef;
+    --quiet: #aab5b1;
+    --mint: #9bd6c1;
+    width: calc(100% - 64px) !important;
+    min-width: 1120px !important;
+    max-width: 1536px !important;
     margin: 0 auto !important;
-    padding: clamp(20px, 3vw, 32px) clamp(16px, 2.5vw, 28px) 24px !important;
+    padding: 20px 0 24px !important;
     background: var(--page);
     color: var(--ink);
+    font-variant-numeric: tabular-nums;
 }
 .gradio-container > .main { padding: 0 !important; }
 .app-html, .app-html .html-container { padding: 0 !important; background: transparent !important; border: 0 !important; }
-.app-header { display: flex; align-items: start; justify-content: space-between; gap: 24px; padding-bottom: 18px; }
-.app-brand { margin: 0 0 12px; font-size: 16px; font-weight: 650; color: var(--mint); }
-.app-header h1 { margin: 0 0 10px; color: var(--ink); font-size: clamp(26px, 3.2vw, 36px); font-weight: 600; line-height: 1.2; letter-spacing: -0.025em; }
-.app-header p { margin: 0; color: var(--quiet); font-size: 15px; line-height: 1.6; }
-.source-link { flex-shrink: 0; padding: 10px 0; color: var(--quiet) !important; font-size: 14px; text-decoration: none; }
-.source-link:hover { color: var(--mint) !important; text-decoration: underline; }
-.research-notice { color: var(--quiet); font-size: 13px; line-height: 1.7; margin: 0 0 16px; }
-.research-notice strong { color: var(--ink); font-weight: 600; }
-.runtime-status { display: flex; align-items: center; gap: 9px; color: var(--quiet); font-size: 13px; padding: 0 0 4px; }
+.app-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 0 16px; border-bottom: 1px solid var(--line); }
+.brand-group, .header-links { display: flex; align-items: center; gap: 24px; }
+.brand-group { gap: 12px; }
+.brand-mark { width: 32px; height: 32px; color: var(--mint); }
+.app-brand { color: var(--ink); font-size: 18px; font-weight: 600; white-space: nowrap; }
+.brand-description { color: var(--quiet); font-size: 13px; padding-left: 16px; margin-left: 4px; border-left: 1px solid var(--line); }
+.page-intro { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px 0 12px; }
+.page-intro h1 { color: var(--ink); font-size: 30px; font-weight: 600; line-height: 1.25; letter-spacing: -0.025em; margin: 0 0 8px; }
+.page-intro p { margin: 0; color: var(--quiet); font-size: 14px; line-height: 1.65; }
+.source-link, .evaluation-link { flex-shrink: 0; color: var(--quiet) !important; font-size: 13px; text-decoration: none; text-underline-offset: 5px; transition: color 160ms ease; }
+.source-link:hover, .evaluation-link:hover { color: var(--mint) !important; text-decoration: underline; }
+.research-notice { color: var(--quiet); font-size: 13px; line-height: 1.65; margin: 0 0 4px; }
+.research-notice strong { color: var(--ink); font-weight: 500; }
+.runtime-status { display: flex; align-items: center; gap: 8px; color: var(--quiet); font-size: 13px; }
 .status-dot { display: inline-block; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--mint); }
-.model-name { margin-left: auto; }
-#workspace { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 24px; gap: 28px; align-items: flex-start; }
-#viewer { gap: 14px; }
-#viewer-tabs { border: 0; }
-#viewer-tabs [role="tab"] { min-height: 44px; padding: 10px 14px; font-size: 14px; }
-#viewer-tabs [role="tabpanel"] { padding: 14px 0 0; border: 0; }
-#mri-input, #cam-output { border: 1px solid var(--line); border-radius: 12px; background: #080f14; }
+#workspace { display: grid !important; grid-template-columns: minmax(0, 1fr) 336px; gap: 24px; align-items: stretch; flex-wrap: nowrap !important; margin-top: 12px; }
+#viewer, #results-panel { min-width: 0 !important; width: 100%; }
+#viewer { gap: 0; }
+#image-grid { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; flex-wrap: nowrap !important; }
+.image-column { min-width: 0 !important; gap: 12px !important; }
+.panel-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.panel-heading h2 { color: var(--ink); font-size: 15px; line-height: 1.5; font-weight: 500; margin: 0; }
+.panel-heading span { color: var(--quiet); font-size: 13px; }
+#mri-input, #cam-output { border: 1px solid var(--line); border-radius: 12px; background: #0c1011; }
+#mri-input:not(:has(img)) { border-style: dashed; }
 #mri-input img, #cam-output img { object-fit: contain; }
-#input-actions { gap: 10px; }
-#input-actions button { min-height: 46px; border-radius: 10px; font-size: 14px; font-weight: 600; }
-#predict-btn { background: var(--mint); color: #0b261d; }
-#predict-btn:hover:not(:disabled) { background: #96e2c6; }
-#predict-btn:disabled { opacity: 1; background: #263b44; color: #b8cbd3; border-color: #36505b; cursor: not-allowed; }
-#clear-btn:disabled { opacity: 0.65; }
+#mri-input .upload-container, #cam-output .upload-container { color: var(--quiet); }
+#input-actions { display: grid !important; grid-template-columns: 232px 112px minmax(0, 1fr); gap: 12px; align-items: center; flex-wrap: nowrap !important; padding: 20px 0; }
+#input-actions button { min-height: 46px; min-width: 0 !important; border-radius: 8px; font-size: 14px; font-weight: 600; transition: background-color 160ms ease, transform 160ms ease; }
+#input-actions button:not(:disabled):hover { transform: translateY(-1px); }
+#input-actions button:not(:disabled):active { transform: translateY(1px); }
+#predict-btn { background: var(--mint); color: #142d24; }
+#predict-btn:hover:not(:disabled) { background: #b7e4d3; }
+#predict-btn:disabled { opacity: 1; background: #28332f; color: #b1c1b9; border-color: #40534a; cursor: not-allowed; }
+#clear-btn:disabled { opacity: 0.55; }
 .gradio-container button:focus-visible, .gradio-container a:focus-visible, .gradio-container summary:focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
-.input-note p, .explanation-note p { margin: 0; color: var(--quiet); font-size: 12px; line-height: 1.7; }
-#results-panel { border-left: 1px solid var(--line); padding-left: 28px; gap: 22px; }
+.input-note { justify-self: end; }
+.input-note p { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.6; text-align: right; }
+.attribution-note { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.7; border-top: 1px solid var(--line); padding-top: 16px; }
+.attribution-note strong { color: var(--ink); font-weight: 500; }
+#results-panel { border-radius: 12px; background: var(--surface); padding: 24px; gap: 20px; }
+.results-heading { padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.results-heading h2 { margin: 0; font-size: 15px; font-weight: 500; color: var(--ink); }
 #result-region { border: 0; background: transparent; padding: 0; }
 .result-card, .empty-result { padding: 0; color: var(--ink); }
-.result-status { display: flex; align-items: center; gap: 9px; margin: 4px 0 14px; color: var(--quiet); font-size: 13px; }
-.result-card h2, .empty-result h2 { color: var(--ink); font-size: 25px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; margin: 0 0 16px; }
-.empty-result { min-height: 230px; padding-top: 10px; }
-.empty-result p:not(.result-status), .result-card > p:not(.result-status) { color: var(--quiet); font-size: 14px; line-height: 1.7; max-width: 45ch; }
-.predicted-type { display: flex; flex-direction: column; gap: 5px; margin: 0 0 22px; color: var(--quiet); font-size: 13px; }
-.predicted-type strong { color: var(--mint); font-size: 22px; font-weight: 600; }
-.model-score { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 14px; }
-.model-score span { color: var(--quiet); }
-.model-score strong { color: var(--ink); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.score-caption { margin: 6px 0 0 !important; font-size: 12px !important; }
-.decision-details { margin-top: 16px; color: var(--quiet); font-size: 12px; line-height: 1.7; }
-.decision-details summary { cursor: pointer; padding: 5px 0; }
-.decision-details p { margin: 6px 0 0; }
-.result-error .result-status { color: #f4bc8a; }
+.result-status { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--quiet); font-size: 13px; }
+.result-card h2, .empty-result h2 { color: var(--ink); font-size: 22px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.4; margin: 0 0 16px; text-wrap: pretty; }
+.empty-result p:not(.result-status), .result-card > p:not(.result-status) { color: var(--quiet); font-size: 13px; line-height: 1.7; }
+.analysis-outline { margin: 28px 0 0; }
+.analysis-outline div { padding: 16px 0; border-top: 1px solid var(--line); }
+.analysis-outline dt { color: var(--ink); font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.analysis-outline dd { margin: 0; color: var(--quiet); font-size: 13px; line-height: 1.7; }
+.predicted-type { display: flex; flex-direction: column; gap: 4px; margin: 0 0 20px; color: var(--quiet); font-size: 13px; }
+.predicted-type strong { color: var(--mint); font-size: 28px; line-height: 1.3; font-weight: 500; letter-spacing: -0.02em; }
+.model-score { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 13px; }
+.model-score span { color: var(--quiet); max-width: 19ch; }
+.model-score strong { color: var(--ink); font-size: 20px; font-weight: 500; white-space: nowrap; }
+.score-caption { margin: 6px 0 0 !important; font-size: 13px !important; }
+.decision-details { margin-top: 12px; color: var(--quiet); font-size: 13px; line-height: 1.7; }
+.decision-details summary { cursor: pointer; padding: 4px 0; }
+.decision-details p { margin: 8px 0 0; }
+.result-error .result-status { color: #efba9c; }
 .score-panel { display: none !important; border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
 #workspace:has(.result-card:not(.result-error)) #binary-scores, #workspace:has(.predicted-type) #type-scores { display: block !important; }
-.score-panel label { color: var(--quiet) !important; font-size: 13px !important; }
-#reading-guide { margin-top: 12px; border-color: var(--line); border-radius: 12px; background: transparent; }
-#reading-guide .prose { color: var(--quiet); font-size: 13px; line-height: 1.8; }
+#score-details { display: none !important; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
+#workspace:has(.result-card:not(.result-error)) #score-details { display: block !important; }
+#score-details > div:not(.label-wrap) { gap: 20px; }
+.score-panel label { color: var(--quiet) !important; font-size: 13px !important; background: transparent !important; border: 0 !important; padding-left: 0 !important; }
+.score-panel { --font-mono: var(--font); }
+#reading-guide { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
+#reading-guide > .label-wrap { min-height: 42px; }
+#reading-guide .prose { color: var(--quiet); font-size: 13px; line-height: 1.8; max-width: 110ch; }
 #reading-guide .prose strong { color: var(--ink); }
-@media (max-width: 760px) {
-    .app-header { gap: 12px; padding-bottom: 18px; }
-    .app-header h1 { max-width: 18ch; }
-    .source-link { font-size: 12px; }
-    #workspace { padding: 16px; gap: 22px; flex-direction: column; }
-    #viewer, #results-panel { flex: none !important; min-width: 0 !important; width: 100% !important; max-width: 100%; }
-    #results-panel { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 22px; }
-    #mri-input, #cam-output { height: 300px !important; }
-    .empty-result { min-height: 130px; }
-    .result-card h2, .empty-result h2 { font-size: 23px; }
-}
 @media (prefers-reduced-motion: reduce) {
+    #input-actions button { transition: none; transform: none !important; }
     .gradio-container *, .gradio-container *::before, .gradio-container *::after { scroll-behavior: auto !important; }
 }
 """
-
 
 with gr.Blocks(title="Brain MRI — Démonstration de classification") as demo:
     page_header = gr.HTML(
         value=page_header_html, apply_default_css=False, elem_classes=["app-html"]
     )
     with gr.Row(elem_id="workspace"):
-        with gr.Column(scale=6, min_width=280, elem_id="viewer"):
-            with gr.Tabs(selected="source", elem_id="viewer-tabs") as viewer_tabs:
-                with gr.Tab("Image IRM", id="source"):
+        with gr.Column(elem_id="viewer"):
+            with gr.Row(elem_id="image-grid"):
+                with gr.Column(elem_classes=["image-column"]):
+                    gr.HTML(
+                        "<div class='panel-heading'><h2>Image IRM</h2><span>Image source</span></div>",
+                        apply_default_css=False,
+                        elem_classes=["app-html"],
+                    )
                     image_input = gr.Image(
                         type="pil",
                         format="png",
@@ -518,10 +551,15 @@ with gr.Blocks(title="Brain MRI — Démonstration de classification") as demo:
                         sources=["upload"],
                         height=360,
                         elem_id="mri-input",
-                        placeholder="Déposez une image ou cliquez pour l’importer",
+                        placeholder="Déposez une IRM ou cliquez pour l’importer",
                         buttons=["fullscreen"],
                     )
-                with gr.Tab("Grad-CAM", id="explanation", render_children=True):
+                with gr.Column(elem_classes=["image-column"]):
+                    gr.HTML(
+                        "<div class='panel-heading'><h2>Grad-CAM</h2><span>Attribution du modèle</span></div>",
+                        apply_default_css=False,
+                        elem_classes=["app-html"],
+                    )
                     gradcam_output = gr.Image(
                         type="pil",
                         format="png",
@@ -533,49 +571,57 @@ with gr.Blocks(title="Brain MRI — Démonstration de classification") as demo:
                         buttons=["fullscreen", "download"],
                         placeholder="La carte apparaît après une analyse",
                     )
-                    gr.Markdown(
-                        "Cette carte illustre l’attribution du modèle. Elle ne délimite pas une tumeur.",
-                        elem_classes=["explanation-note"],
-                    )
             with gr.Row(elem_id="input-actions"):
                 predict_button = gr.Button(
                     "Analyser l’image",
                     variant="primary",
                     interactive=False,
                     elem_id="predict-btn",
-                    scale=3,
-                    min_width=160,
+                    min_width=0,
                 )
                 clear_button = gr.Button(
-                    "Effacer", interactive=False, elem_id="clear-btn", scale=1, min_width=80
+                    "Effacer", interactive=False, elem_id="clear-btn", min_width=0
                 )
-            gr.Markdown(
-                "Utilisez une image anonymisée. PNG ou JPEG conseillés.",
-                elem_classes=["input-note"],
+                gr.Markdown(
+                    "Image anonymisée\n\nPNG ou JPEG conseillés",
+                    elem_classes=["input-note"],
+                )
+            gr.HTML(
+                "<p class='attribution-note'><strong>À propos de Grad-CAM.</strong> "
+                "La carte met en évidence les régions qui contribuent à la prédiction. "
+                "Elle ne délimite pas une tumeur et n’est pas une localisation médicale validée.</p>",
+                apply_default_css=False,
+                elem_classes=["app-html"],
             )
-        with gr.Column(scale=5, min_width=280, elem_id="results-panel"):
+        with gr.Column(elem_id="results-panel"):
+            gr.HTML(
+                "<div class='results-heading'><h2>Résultats du modèle</h2></div>",
+                apply_default_css=False,
+                elem_classes=["app-html"],
+            )
             result_output = gr.HTML(
                 value=EMPTY_RESULT,
                 elem_id="result-region",
                 apply_default_css=False,
                 elem_classes=["app-html"],
             )
-            probability_output = gr.Label(
-                label="Scores binaires · non calibrés",
-                show_heading=False,
-                num_top_classes=2,
-                elem_id="binary-scores",
-                color="#74d4b0",
-                elem_classes=["score-panel"],
-            )
-            tumor_type_output = gr.Label(
-                label="Scores par type · parmi les tumeurs",
-                show_heading=False,
-                num_top_classes=3,
-                elem_id="type-scores",
-                color="#74d4b0",
-                elem_classes=["score-panel"],
-            )
+            with gr.Accordion("Distributions des scores", open=False, elem_id="score-details"):
+                probability_output = gr.Label(
+                    label="Scores binaires · non calibrés",
+                    show_heading=False,
+                    num_top_classes=2,
+                    elem_id="binary-scores",
+                    color="#9bd6c1",
+                    elem_classes=["score-panel"],
+                )
+                tumor_type_output = gr.Label(
+                    label="Scores par type · parmi les tumeurs",
+                    show_heading=False,
+                    num_top_classes=3,
+                    elem_id="type-scores",
+                    color="#9bd6c1",
+                    elem_classes=["score-panel"],
+                )
     with gr.Accordion(
         "Comprendre les résultats et les limites", open=False, elem_id="reading-guide"
     ):
@@ -624,7 +670,6 @@ with gr.Blocks(title="Brain MRI — Démonstration de classification") as demo:
         outputs=[image_input, *ui_outputs],
         queue=False,
         cancels=[analysis_event],
-        js="(...args) => { document.querySelector('#viewer-tabs [role=tab]')?.click(); return args; }",
     )
     demo.load(fn=page_header_html, outputs=[page_header], queue=False)
 
